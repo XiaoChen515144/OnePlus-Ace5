@@ -1,0 +1,9 @@
+filegroup {
+    name: "ace5_dtb",
+    srcs: ["dtb/ace5.dtb"],
+}
+
+filegroup {
+    name: "op5d2bl1_kernel",
+    srcs: ["prebuilt/kernel/Image"],
+}
