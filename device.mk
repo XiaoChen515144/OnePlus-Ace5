@@ -8,5 +8,3 @@ PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/prebuilt/modules/modules.load.recovery:$(TARGET_COPY_OUT_RECOVERY)/root/vendor/lib/modules/modules.load \
     $(LOCAL_PATH)/prebuilt/modules/modules.softdep:$(TARGET_COPY_OUT_RECOVERY)/root/vendor/lib/modules/modules.softdep
 
-PRODUCT_COPY_FILES += $(foreach module,$(wildcard $(LOCAL_PATH)/prebuilt/modules/*.ko),\
-    $(module):$(TARGET_COPY_OUT_RECOVERY)/root/vendor/lib/modules/$(notdir $(module)))
