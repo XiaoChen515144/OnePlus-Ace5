@@ -1,2 +1,5 @@
 PRODUCT_MAKEFILES := \
     $(LOCAL_DIR)/omni_OP5D2BL1.mk
+
+COMMON_LUNCH_CHOICES := \
+    omni_OP5D2BL1-ap2a-eng
