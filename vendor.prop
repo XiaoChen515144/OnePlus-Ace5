@@ -17,16 +17,29 @@ vendor.gatekeeper.is_security_level_spu=0
 vendor.usb.use_ffs_mtp=1
 persist.sys.oem.otg_support=true
 
+# ADB / charger / OTG
+# AOSP 16 generates system/build.prop from the Soong product config, so a
+# device-tree system.prop is no longer consumed. These props are kept here
+# because vendor.prop becomes vendor/build.prop, which the build appends to the
+# recovery ramdisk's prop.default.
+ro.adb.secure=0
+ro.boot.dynamic_partitions=true
+ro.charger.enable_suspend=1
+persist.sys.isUsbOtgEnabled=true
+
 # Vibrator
+# /vendor/bin/hw/vendor.oplus.hardware.vibrator-service reads the LRA
+# calibration range from these props. Values dumped from the device
+# (getprop ro.oplus.haptic.lra_*).
 ro.oplus.haptic.lra_value_set=true
-ro.oplus.haptic.lra_range_min=120
-ro.oplus.haptic.lra_range_gap1=124
-ro.oplus.haptic.lra_range_gap2=128
-ro.oplus.haptic.lra_range_gap3=131
-ro.oplus.haptic.lra_range_gap4=136
-ro.oplus.haptic.lra_range_max=140
-ro.oplus.haptic.lra_level_low=122
-ro.oplus.haptic.lra_level_middle=126
-ro.oplus.haptic.lra_level_middle1=130
-ro.oplus.haptic.lra_level_middle2=134
-ro.oplus.haptic.lra_level_high=138
+ro.oplus.haptic.lra_range_min=160
+ro.oplus.haptic.lra_range_gap1=164
+ro.oplus.haptic.lra_range_gap2=168
+ro.oplus.haptic.lra_range_gap3=172
+ro.oplus.haptic.lra_range_gap4=176
+ro.oplus.haptic.lra_range_max=180
+ro.oplus.haptic.lra_level_low=162
+ro.oplus.haptic.lra_level_middle=166
+ro.oplus.haptic.lra_level_middle1=170
+ro.oplus.haptic.lra_level_middle2=174
+ro.oplus.haptic.lra_level_high=178

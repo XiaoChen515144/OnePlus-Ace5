@@ -95,7 +95,9 @@ TARGET_RECOVERY_PIXEL_FORMAT := RGBX_8888
 TARGET_RECOVERY_FSTAB := $(DEVICE_PATH)/recovery.fstab
 
 # Extras
-TARGET_SYSTEM_PROP += $(DEVICE_PATH)/system.prop
+# Only vendor.prop is wired up: AOSP 16 builds system/build.prop from the Soong
+# product config, so TARGET_SYSTEM_PROP is not consumed any more. All recovery
+# properties live in vendor.prop.
 TARGET_VENDOR_PROP += $(DEVICE_PATH)/vendor.prop
 
 # Crypto

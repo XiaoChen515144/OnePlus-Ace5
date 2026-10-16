@@ -116,6 +116,21 @@ ramdisk under `/vendor/bin/hw/` and their `.rc` files are adjusted accordingly.
 Every recovery HAL service gets `seclabel u:r:recovery:s0` (recovery has no
 vendor SELinux policy).
 
+Data files that the vendor libraries open by **absolute path** cannot simply be
+relocated, so they keep their stock path and are shipped under
+`recovery/root/odm/` (the `/odm` directory exists in the ramdisk only; mounting
+the real `odm` partition from the TWRP mount menu simply shadows it):
+
+* `odm/etc/vibrator/` — `vibrator_effect.json` plus `809/{def,soft}/*.bin`.
+  `liboplusvibratoreffect.so` loads this JSON and then loads the effect files
+  using the absolute paths stored inside it (`/odm/etc/vibrator/809/...`).
+* `odm/etc/wave_lib/` + `odm/etc/lra_model_0.conf` — used by `libsivibrator.so`.
+* `odm/etc/ueventd.rc` / `odm/etc/ueventd.reserve.rc` — imported by the AOSP
+  `system/etc/ueventd.rc`; shipping them keeps the imports resolvable.
+
+The `ro.oplus.haptic.lra_*` calibration properties the vibrator HAL reads are in
+`vendor.prop`, with the values measured on the device.
+
 Core AOSP libraries that the recovery ramdisk already provides (`libc`, `libm`,
 `libc++`, `libbase`, `libbinder*`, `libcutils`, `liblog`, `libutils`,
 `libhardware`, `libhidlbase`, `libz`, `libcrypto`, `libssl`, `libpng`, …) are
@@ -132,7 +147,15 @@ To regenerate the blobs for a different firmware:
 ```
 
 `vendor_blobs.list` is the exact file list; the files live at `/vendor`, `/odm`
-or `/vendor_dlkm` on the device.
+or `/vendor_dlkm` on the device (a few libraries that the vendor HALs need come
+from `/system/lib64`, which the script also checks).
+
+The list intentionally contains **only** device-provided data. Files this tree
+maintains by hand — the recovery `.rc` files under `vendor/etc/init/`, the VINTF
+manifests, `twrp.flags`, `variant-script.sh`, … — are not listed, so re-running
+the script never overwrites them (that is why the HAL `.rc` files here differ
+from the stock ones). The script also re-applies each file's permissions from the
+device, because `adb pull` does not preserve the executable bit.
 
 ## Layout
 
@@ -145,7 +168,7 @@ vendorsetup.sh                 OrangeFox environment (FOX_* build vars)
 twrp.dependencies              extra repo dependencies (none needed)
 Android.mk / Android.bp        build glue
 recovery.fstab                 Android fstab (dynamic + physical partitions)
-system.prop / vendor.prop      recovery properties
+vendor.prop                    recovery properties (wired up as TARGET_VENDOR_PROP)
 security/otacert.x509.pem      OTA certificate
 prebuilt/kernel/Image          stock kernel (reference only; not used by the build)
 dtb/                           stock DTB/DTBO overlays (reference only; not used)
@@ -160,6 +183,10 @@ recovery/root/
     vendor/etc/vintf/          VINTF manifest + HAL fragments
     vendor/lib/modules/        complete 483-module set + depmod metadata
     vendor/bin/hw/             recovery HAL daemons (keymint/weaver/…)
+    odm/etc/vibrator/          vibrator effect config (absolute paths!)
+    odm/etc/wave_lib/          LRA waveform library
+    odm/etc/lra_model_0.conf   LRA model calibration
+    odm/etc/ueventd*.rc        ODM ueventd rules (imported by the AOSP ueventd.rc)
 ```
 
 ## Notes / status
@@ -170,7 +197,10 @@ recovery/root/
   `TW_EXCLUDE_MTP := true` to `BoardConfig.mk`.
 * Touch modules are the Synaptics S3910 family; if a different panel supplier
   (e.g. Goodix) shows up, adjust `TW_LOAD_VENDOR_MODULES` accordingly.
-* Vibration works through the kernel haptic device. The vendor's vibration
-  **effect** files (`/odm/etc/vibrator/…` on the stock ROM) are not bundled;
-  copy them into `recovery/root/vendor/etc/vibrator/` if the effect library
-  complains.
+* Vibration works through the kernel haptic device (`/dev/awinic_haptic`) with
+  the vendor's full effect configuration bundled in the ramdisk at
+  `recovery/root/odm/etc/` (see above), so `liboplusvibratoreffect.so` and
+  `libsivibrator.so` find their effect files and waveforms.
+* AAC "richtap" is not supported by this firmware: there is no
+  `/odm/etc/aac_richtap.config` on the device, so the HAL logs
+  `aac richtap not support` — exactly like the stock ROM.
