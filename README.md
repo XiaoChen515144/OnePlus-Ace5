@@ -55,33 +55,26 @@ step needs a local device or a local Android SDK.
 
 ### GitHub Actions (recommended — no local machine needed)
 
-[`.github/workflows/fox_16.0-build.yml`](.github/workflows/fox_16.0-build.yml)
-builds on GitHub-hosted runners. The repository is public, so runner minutes are
-free.
+Builds run from the
+[`Multiple-Recovery-Builder-2026`](https://github.com/XiaoChen515144/Multiple-Recovery-Builder-2026)
+builder repository: workflow **OrangeFox fox_16.0 - OnePlus Ace 5 (OP5D2BL1)**
+(`.github/workflows/fox_16.0-Ace5-OP5D2BL1.yml` on its `OrangeFox` branch). It is
+preconfigured for this device (manifest branch `16.0`, this tree at `main`,
+`twrp_OP5D2BL1-bp2a-eng`, `mka adbd recoveryimage`), so starting it from the
+Actions page is enough; it also runs when its own workflow file is edited.
 
-| Trigger | Result |
-|---|---|
-| push to `main` (anything but docs) | build + artifact + release `fox16-<commit>` |
-| tag push (`v*`) | build + artifact + release under the pushed tag |
-| pull request | build only (validation, no release) |
-| manual (`workflow_dispatch`) | build, optionally without publishing |
-
-Artifacts per run:
-
-* `recovery-OP5D2BL1-<run>-<attempt>` — `recovery.img` + `.sha256` + `.md5`
-  (30 days)
-* `build-logs-<run>-<attempt>` — `build.log`, `out/error.log`,
-  `out/verbose.log.gz` (**only** when the build fails)
-
-The manual trigger takes inputs: `fox_branch` (default `fox_16.0`),
-`build_target` (default `adbd recoveryimage`), `fox_build_type` (default
-`Alpha`) and `release`.
-
-To stop publishing a release on every push, remove the `Publish release` step
-(or set `release: false` when starting a manual run).
+Each run verifies the produced image (boot header, the 483 kernel modules, the
+vibrator HAL and its `/odm` data, parity with this tree), runs `ldcheck` over the
+security and vibrator binaries, uploads `recovery.img` + `.sha256` + `.md5` as an
+artifact, publishes a release tagged `fox16-<device tree commit>`, and
+force-pushes a build report to that repository's `ci-logs` branch, which can be
+read with a plain `git fetch` (job logs need a token, the report does not).
 
 A cold run takes roughly 1–2 hours on a standard runner: every run syncs the
 ~390-project OrangeFox manifest with `--depth=1` and then builds from scratch.
+
+This repository deliberately ships no workflow of its own, so pushing here never
+starts a build.
 
 ### Locally on a build machine
 
@@ -224,7 +217,6 @@ twrp_OP5D2BL1.mk               product definition (lunch target)
 AndroidProducts.mk             lunch choices
 vendorsetup.sh                 OrangeFox environment (FOX_* build vars)
 build.sh                       one-shot automated local build (sync + build)
-.github/workflows/             GitHub Actions build (artifact + release)
 twrp.dependencies              extra repo dependencies (none needed)
 Android.mk / Android.bp        build glue
 recovery.fstab                 Android fstab (dynamic + physical partitions)
