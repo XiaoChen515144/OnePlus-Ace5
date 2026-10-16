@@ -47,6 +47,64 @@ The image is written to `out/target/product/OP5D2BL1/recovery.img`.
 `ALLOW_MISSING_DEPENDENCIES` is already set by `BoardConfig.mk`; `LC_ALL="C"` is
 recommended to avoid locale issues during the build.
 
+## Automated builds
+
+Two fully automated paths exist; both do the same work (sync `fox_16.0`, install
+this tree as `device/oneplus/OP5D2BL1`, lunch, `mka adbd recoveryimage`) and no
+step needs a local device or a local Android SDK.
+
+### GitHub Actions (recommended — no local machine needed)
+
+[`.github/workflows/fox_16.0-build.yml`](.github/workflows/fox_16.0-build.yml)
+builds on GitHub-hosted runners. The repository is public, so runner minutes are
+free.
+
+| Trigger | Result |
+|---|---|
+| push to `main` (anything but docs) | build + artifact + release `fox16-<commit>` |
+| tag push (`v*`) | build + artifact + release under the pushed tag |
+| pull request | build only (validation, no release) |
+| manual (`workflow_dispatch`) | build, optionally without publishing |
+
+Artifacts per run:
+
+* `recovery-OP5D2BL1-<run>-<attempt>` — `recovery.img` + `.sha256` + `.md5`
+  (30 days)
+* `build-logs-<run>-<attempt>` — `build.log`, `out/error.log`,
+  `out/verbose.log.gz` (**only** when the build fails)
+
+The manual trigger takes inputs: `fox_branch` (default `fox_16.0`),
+`build_target` (default `adbd recoveryimage`), `fox_build_type` (default
+`Alpha`) and `release`.
+
+To stop publishing a release on every push, remove the `Publish release` step
+(or set `release: false` when starting a manual run).
+
+A cold run takes roughly 1–2 hours on a standard runner: every run syncs the
+~390-project OrangeFox manifest with `--depth=1` and then builds from scratch.
+
+### Locally on a build machine
+
+[`build.sh`](build.sh) is a one-shot, idempotent script: it installs the host
+dependencies (via
+[OrangeFox's `android_build_env.sh`](https://gitlab.com/OrangeFox/misc/scripts)),
+syncs the manifest, installs this tree, builds, and prints the image path and
+its `sha256`.
+
+```bash
+./build.sh                 # everything: deps (if needed), sync, build
+./build.sh --no-sync       # rebuild without re-syncing
+./build.sh --sync-only     # prepare the source tree only
+./build.sh -j 8            # cap parallel jobs (repo sync + make)
+./build.sh --flash         # build, then fastboot flash recovery_a/_b
+./build.sh --help
+```
+
+Requires ~70 GB free disk space and a few hours on a small box; a 4-core/6 GB
+machine is not enough — use the GitHub Actions workflow there. The source tree
+defaults to `~/fox_16.0` and the output to `~/fox-out` (`--dir` / `--out` /
+`SRC` / `OUT_DIR` override them).
+
 ## Flash
 
 Bootloader must be unlocked (`fastboot flashing unlock`; on this unit
@@ -165,6 +223,8 @@ device-OP5D2BL1.mk             product config (base/VAB/API/UFFD)
 twrp_OP5D2BL1.mk               product definition (lunch target)
 AndroidProducts.mk             lunch choices
 vendorsetup.sh                 OrangeFox environment (FOX_* build vars)
+build.sh                       one-shot automated local build (sync + build)
+.github/workflows/             GitHub Actions build (artifact + release)
 twrp.dependencies              extra repo dependencies (none needed)
 Android.mk / Android.bp        build glue
 recovery.fstab                 Android fstab (dynamic + physical partitions)

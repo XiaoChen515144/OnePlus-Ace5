@@ -1,0 +1,304 @@
+#
+# OrangeFox Recovery (fox_16.0) automated build for the OnePlus Ace 5
+# (PKG110 / OP5D2BL1 / giulia).
+#
+# The device tree in this repository is dropped into device/oneplus/OP5D2BL1 of a
+# freshly synced OrangeFox fox_16.0 source tree, then
+#
+#     lunch twrp_OP5D2BL1-bp2a-eng
+#     mka adbd recoveryimage
+#
+# produces $OUT_DIR/target/product/OP5D2BL1/recovery.img. The image plus its
+# checksums are uploaded as a workflow artifact; pushes to main (and v* tags)
+# also publish a GitHub release so the newest flashable image is always one
+# click away.
+#
+# No kernel sources and no local Android SDK are needed: BoardConfig.mk sets
+# BOARD_EXCLUDE_KERNEL_FROM_RECOVERY_IMAGE := true and every host tool comes
+# from the synced prebuilts.
+#
+# Costs: this repository is public, so GitHub-hosted runner minutes are free.
+# A cold run (repo sync + full build) takes roughly 1-2 hours on a standard
+# 4 vCPU runner; scheduled runs stay warm only within a single job, so every
+# run pays for the sync.
+#
+name: fox_16.0 build
+
+on:
+  # Fully automatic: build on every change that can affect the image.
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE*'
+  # Validate pull requests before merging (no release is published).
+  pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE*'
+  # Manual runs with overrides.
+  workflow_dispatch:
+    inputs:
+      fox_branch:
+        description: 'OrangeFox manifest branch'
+        default: fox_16.0
+        required: false
+      build_target:
+        description: 'Target(s) passed to mka'
+        default: adbd recoveryimage
+        required: false
+      fox_build_type:
+        description: 'FOX_BUILD_TYPE baked into the image (Alpha/Beta/Stable)'
+        default: Alpha
+        required: false
+      release:
+        description: 'Publish the image as a GitHub release'
+        type: boolean
+        default: true
+        required: false
+
+# A newer push/branch build makes older ones pointless.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Needed to create the release and the tag.
+permissions:
+  contents: write
+
+env:
+  DEVICE: OP5D2BL1
+  LUNCH_TARGET: twrp_OP5D2BL1-bp2a-eng
+  FOX_BRANCH: ${{ github.event.inputs.fox_branch || 'fox_16.0' }}
+  BUILD_TARGET: ${{ github.event.inputs.build_target || 'adbd recoveryimage' }}
+  FOX_BUILD_TYPE: ${{ github.event.inputs.fox_build_type || 'Alpha' }}
+
+jobs:
+  build:
+    name: recovery.img (${{ github.ref_name }})
+    # Matches OrangeFox's own CI host. Bump to ubuntu-24.04 (or ubuntu-latest)
+    # if you want newer host tools; the setup script supports both.
+    runs-on: ubuntu-22.04
+    # GitHub-hosted jobs are killed after 6 h; a cold build fits comfortably.
+    timeout-minutes: 350
+
+    steps:
+      - name: Checkout device tree
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Prepare runner (disk space, swap, work paths)
+        run: |
+          set -euo pipefail
+
+          # Preinstalled toolchains that this build never uses. Removing them
+          # reclaims ~25-30 GB on the (small) root disk.
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /usr/local/lib/android \
+            /usr/local/share/boost \
+            /opt/ghc \
+            /opt/hostedtoolcache \
+            /usr/share/swift \
+            /opt/az \
+            /opt/microsoft \
+            /usr/local/lib/node_modules \
+            /usr/local/rustup \
+            /usr/local/cargo
+          sudo apt-get clean
+          echo "--- free space after cleanup ---"
+          df -h /
+
+          # Keep sources and build output on the largest mount. Standard runners
+          # have everything on /, but /mnt is a separate (larger) disk on some
+          # images.
+          WORK_ROOT="$(df -Pk /mnt / 2>/dev/null \
+            | awk 'NR > 1 && $6 != "" {print $4, $6}' \
+            | sort -rn | head -1 | awk '{print $2}')" || WORK_ROOT=""
+          WORK_ROOT="${WORK_ROOT:-/home/runner}"
+          SRC="$WORK_ROOT/fox_16.0"
+          OUT_DIR="$WORK_ROOT/fox-out"
+          mkdir -p "$SRC" "$OUT_DIR" "$GITHUB_WORKSPACE/artifacts"
+          {
+            echo "WORK_ROOT=$WORK_ROOT"
+            echo "SRC=$SRC"
+            echo "OUT_DIR=$OUT_DIR"
+          } >> "$GITHUB_ENV"
+          echo "work root: $WORK_ROOT"
+          df -h "$WORK_ROOT"
+
+          # Swap: prevents the linker from being OOM-killed on memory-heavy
+          # steps. Cheap insurance, ignored if it is already active.
+          if [ ! -f "$WORK_ROOT/swapfile" ]; then
+            sudo fallocate -l 16G "$WORK_ROOT/swapfile" \
+              || sudo dd if=/dev/zero of="$WORK_ROOT/swapfile" bs=1M count=16384 status=none
+            sudo chmod 600 "$WORK_ROOT/swapfile"
+            sudo mkswap "$WORK_ROOT/swapfile" >/dev/null
+          fi
+          sudo swapon "$WORK_ROOT/swapfile" 2>/dev/null || true
+          free -h
+
+      - name: Install build dependencies
+        run: |
+          set -e
+          git config --global --add safe.directory '*'
+          git config --global user.name 'fox_16.0 CI'
+          git config --global user.email 'ci@localhost'
+          git config --global color.ui false
+
+          # OrangeFox's own host setup script (Ubuntu/Mint), non-interactive.
+          curl -fsSL \
+            https://gitlab.com/OrangeFox/misc/scripts/-/raw/master/setup/android_build_env.sh \
+            -o /tmp/android_build_env.sh
+          sudo bash /tmp/android_build_env.sh
+
+          # The setup script drops `repo` in /usr/local/bin without the exec bit.
+          [ -x /usr/local/bin/repo ] || sudo chmod a+x /usr/local/bin/repo
+          hash -r
+          python3 --version
+          repo --version
+
+      - name: Sync OrangeFox ${{ env.FOX_BRANCH }} sources
+        run: |
+          set -euo pipefail
+          cd "$SRC"
+          repo init --depth=1 -u https://gitlab.com/OrangeFox/Manifest.git -b "$FOX_BRANCH"
+          repo sync -c -j"$(nproc --all)" --no-clone-bundle --no-tags
+          echo "--- synced tree ---"
+          du -sh "$SRC"
+          df -h "$WORK_ROOT"
+
+      - name: Install device tree
+        run: |
+          set -euo pipefail
+          DEST="$SRC/device/oneplus/$DEVICE"
+          rm -rf "$DEST"
+          mkdir -p "$(dirname "$DEST")"
+          # Copy the repository (checked out at the commit being built) into the
+          # source tree, minus VCS metadata and build leftovers.
+          tar -C "$GITHUB_WORKSPACE" \
+            --exclude=./.git --exclude=./artifacts --exclude=./build.log \
+            --exclude=./build-logs -cf - . | tar -C "$DEST" -xf -
+          echo "installed $(du -sh "$DEST" | cut -f1) into $DEST"
+          ls -l "$DEST"
+
+      - name: Build ${{ env.BUILD_TARGET }}
+        id: build
+        run: |
+          set -eo pipefail
+          cd "$SRC"
+          export LC_ALL=C
+          export ALLOW_MISSING_DEPENDENCIES=true
+          export FOX_BUILD_DEVICE="$DEVICE"
+          export FOX_BUILD_TYPE="$FOX_BUILD_TYPE"
+          export OUT_DIR="$OUT_DIR"
+
+          source build/envsetup.sh
+          lunch "$LUNCH_TARGET"
+
+          # Keep building even if mka fails, so diagnostics can be collected.
+          set +e
+          mka $BUILD_TARGET 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+          RC=${PIPESTATUS[0]}
+          set -e
+
+          mkdir -p "$GITHUB_WORKSPACE/build-logs"
+          for f in error.log verbose.log.gz; do
+            [ -f "$OUT_DIR/$f" ] && cp -f "$OUT_DIR/$f" "$GITHUB_WORKSPACE/build-logs/"
+          done
+
+          if [ "$RC" -ne 0 ]; then
+            echo "::error::build failed (rc=$RC); see the tail below and the build-logs artifact"
+            tail -n 100 "$GITHUB_WORKSPACE/build.log" || true
+          fi
+          exit "$RC"
+
+      - name: Collect recovery.img
+        if: success()
+        id: collect
+        run: |
+          set -euo pipefail
+          PRODUCT_OUT="$OUT_DIR/target/product/$DEVICE"
+          IMG="$PRODUCT_OUT/recovery.img"
+          echo "--- product output ---"
+          ls -l "$PRODUCT_OUT" | head -40 || true
+          test -s "$IMG" || { echo "::error::no recovery.img at $IMG"; exit 1; }
+
+          cp "$IMG" "$GITHUB_WORKSPACE/artifacts/recovery.img"
+          cd "$GITHUB_WORKSPACE/artifacts"
+          sha256sum recovery.img > recovery.img.sha256
+          md5sum recovery.img > recovery.img.md5
+          cat recovery.img.sha256 recovery.img.md5
+
+          SIZE="$(stat -c %s recovery.img)"
+          echo "size=$SIZE" >> "$GITHUB_OUTPUT"
+          {
+            echo "### OrangeFox $FOX_BRANCH - OnePlus Ace 5 ($DEVICE)"
+            echo
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| commit | \`$GITHUB_SHA\` |"
+            echo "| product | \`$LUNCH_TARGET\` |"
+            echo "| target | \`$BUILD_TARGET\` |"
+            echo "| build type | \`$FOX_BUILD_TYPE\` |"
+            echo "| image size | $(numfmt --to=iec "$SIZE") ($SIZE bytes) |"
+            echo "| sha256 | \`$(cut -d' ' -f1 recovery.img.sha256)\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload recovery.img artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovery-${{ env.DEVICE }}-${{ github.run_number }}-${{ github.run_attempt }}
+          path: artifacts
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            build.log
+            build-logs
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Publish release
+        # Never on pull requests; on push/tag always, on manual runs only when asked.
+        if: >-
+          success()
+          && github.event_name != 'pull_request'
+          && github.event.inputs.release != 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('fox16-{0}', github.sha) }}
+          name: OrangeFox fox_16.0 - OnePlus Ace 5 (${{ github.sha }})
+          body: |
+            Automatic OrangeFox `fox_16.0` build for the **OnePlus Ace 5**
+            (PKG110 / OP5D2BL1 / giulia).
+
+            * commit: `${{ github.sha }}`
+            * lunch: `${{ env.LUNCH_TARGET }}`
+            * targets: `${{ env.BUILD_TARGET }}`
+            * build type: `${{ env.FOX_BUILD_TYPE }}`
+            * workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            `recovery.img` is a ramdisk-only recovery (kernel comes from the stock
+            `boot` partition), so flash it with:
+
+            ```
+            fastboot flash recovery_a recovery.img
+            fastboot flash recovery_b recovery.img
+            ```
+
+            Verify with the attached `recovery.img.sha256` before flashing.
+          files: |
+            artifacts/recovery.img
+            artifacts/recovery.img.sha256
+            artifacts/recovery.img.md5
+          draft: false
+          prerelease: false
