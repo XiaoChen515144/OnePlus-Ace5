@@ -170,13 +170,27 @@ jobs:
           git config --global color.ui false
 
           # OrangeFox's own host setup script (Ubuntu/Mint), non-interactive.
-          curl -fsSL \
+          # gitlab.com answered 503 once and killed a whole 1.5 h run, so retry
+          # hard and fall back to the copy pinned in this repository.
+          ENV_SCRIPT=/tmp/android_build_env.sh
+          RETRY=(--retry 10 --retry-delay 6 --retry-all-errors --retry-connrefused)
+          curl -fsSL "${RETRY[@]}" \
             https://gitlab.com/OrangeFox/misc/scripts/-/raw/master/setup/android_build_env.sh \
-            -o /tmp/android_build_env.sh
-          sudo bash /tmp/android_build_env.sh
+            -o "$ENV_SCRIPT" \
+            || { echo "gitlab unreachable, using the pinned copy"; \
+                 cp "$GITHUB_WORKSPACE/.github/scripts/android_build_env.sh" "$ENV_SCRIPT"; }
+          sudo bash "$ENV_SCRIPT"
 
-          # The setup script drops `repo` in /usr/local/bin without the exec bit.
+          # The setup script drops `repo` in /usr/local/bin without the exec bit,
+          # and downloads it without -f, so a transient 503 there leaves a broken
+          # file behind. Verify and re-fetch if needed.
           [ -x /usr/local/bin/repo ] || sudo chmod a+x /usr/local/bin/repo
+          if ! repo --version >/dev/null 2>&1; then
+            echo "repo launcher unusable, fetching it directly"
+            sudo curl -fsSL "${RETRY[@]}" \
+              -o /usr/local/bin/repo https://storage.googleapis.com/git-repo-downloads/repo
+            sudo chmod a+rx /usr/local/bin/repo
+          fi
           hash -r
           python3 --version
           repo --version
@@ -186,8 +200,29 @@ jobs:
           set -euo pipefail
           exec > >(tee -a "$GITHUB_WORKSPACE/ci.log") 2>&1
           cd "$SRC"
-          repo init --depth=1 -u https://gitlab.com/OrangeFox/Manifest.git -b "$FOX_BRANCH"
-          repo sync -c -j"$(nproc --all)" --no-clone-bundle --no-tags
+          # gitlab.com is the single external dependency here and it does
+          # return transient 503s. `repo init` is cheap to repeat, and a
+          # repeated `repo sync` resumes where the previous one stopped, so
+          # both get retried instead of losing the whole run.
+          init_ok=0
+          for attempt in 1 2 3 4 5; do
+            if repo init --depth=1 -u https://gitlab.com/OrangeFox/Manifest.git -b "$FOX_BRANCH"; then
+              init_ok=1; break
+            fi
+            echo "repo init failed (attempt ${attempt}/5), retrying in $((attempt * 15))s"
+            sleep $((attempt * 15))
+          done
+          [ "$init_ok" = 1 ] || { echo "repo init failed after 5 attempts"; exit 1; }
+
+          sync_ok=0
+          for attempt in 1 2 3; do
+            if repo sync -c -j"$(nproc --all)" --no-clone-bundle --no-tags; then
+              sync_ok=1; break
+            fi
+            echo "repo sync failed (attempt ${attempt}/3), resuming in 30s"
+            sleep 30
+          done
+          [ "$sync_ok" = 1 ] || { echo "repo sync failed after 3 attempts"; exit 1; }
           echo "--- synced tree ---"
           du -sh "$SRC"
           df -h "$WORK_ROOT"
