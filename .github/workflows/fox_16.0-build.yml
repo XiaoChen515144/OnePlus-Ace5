@@ -372,6 +372,10 @@ jobs:
             echo "## haptics / vibrator"
             grep -niE 'awinic|haptic|vibrator|leds' "$GITHUB_WORKSPACE/build.log" 2>/dev/null | tail -n 60 || echo "(no matches)"
             echo
+            echo "## ninja progress when it stopped"
+            grep -oE '\[ *[0-9]+% [0-9]+/[0-9]+\]' "$GITHUB_WORKSPACE/build.log" 2>/dev/null | tail -1 || echo "(n/a)"
+            echo "failed targets: $(grep -c '^FAILED:' "$GITHUB_WORKSPACE/build.log" 2>/dev/null || echo 0)"
+            echo
             echo "## build errors"
             grep -nE 'ninja: build stopped|^FAILED|error:|ERROR:|undefined reference' \
               "$GITHUB_WORKSPACE/build.log" 2>/dev/null | tail -n 60 || echo "(no matches)"

@@ -76,7 +76,7 @@ PRODUCT_SOONG_NAMESPACES += $(DEVICE_PATH)
 
 # OEM otacerts
 PRODUCT_EXTRA_RECOVERY_KEYS += \
-    $(DEVICE_PATH)/security
+    $(DEVICE_PATH)/security/otacert
 
 # NOTE: the recovery ramdisk contents (init scripts, twrp.flags, props files and
 # the full 483-module kernel-module set) are shipped from $(DEVICE_PATH)/recovery/root,
