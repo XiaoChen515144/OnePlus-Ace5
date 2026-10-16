@@ -179,7 +179,18 @@ TW_DEVICE_VERSION := OnePlus_Ace5-C16.0.7.200
 # Touch on this unit is a Synaptics S3910 panel controller, driven by
 # oplus_bsp_tp_tcm_S3910.ko; oplus_bsp_synaptics_tcm2.ko is the shared TCM2
 # transport. (No Goodix module is needed on this panel.)
-TW_LOAD_VENDOR_MODULES := "ufs_qcom.ko ufshcd-crypto-qti.ko dwc3-msm.ko msm_drm.ko msm_ext_display.ko oplus_bsp_tp_tcm_S3910.ko oplus_bsp_synaptics_tcm2.ko"
+#
+# Vibration: the vibrator HAL (and TWRP's AIDL haptics) drive the Awinic AW8697
+# I2C haptic chip through /dev/awinic_haptic, so the chip driver must be loaded
+# before the HAL is started. aw8697.ko comes first: it is the driver that probes
+# on this unit (i2c/aw8697_haptic) and registers the misc device; haptic.ko,
+# si_haptic.ko and oplus_haptic.ko are the other OPLUS hw variants, loaded in
+# the same order as the stock recovery's modules.load.recovery so that they
+# cannot claim the node first. haptic_feedback.ko is pulled in as a dependency.
+# Without this there is no /dev/awinic_haptic in recovery and nothing vibrates -
+# this unit has no /sys/class/leds/vibrator, so TWRP's sysfs fallback cannot
+# work either.
+TW_LOAD_VENDOR_MODULES := "ufs_qcom.ko ufshcd-crypto-qti.ko dwc3-msm.ko msm_drm.ko msm_ext_display.ko oplus_bsp_tp_tcm_S3910.ko oplus_bsp_synaptics_tcm2.ko aw8697.ko haptic.ko si_haptic.ko oplus_haptic.ko"
 TW_LOAD_VENDOR_MODULES_EXCLUDE_GKI := true
 TW_LOAD_VENDOR_BOOT_MODULES := true
 TW_LOAD_PREBUILT_MODULES_AT_FIRST := true

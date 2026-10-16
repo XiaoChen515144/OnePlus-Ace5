@@ -197,10 +197,15 @@ recovery/root/
   `TW_EXCLUDE_MTP := true` to `BoardConfig.mk`.
 * Touch modules are the Synaptics S3910 family; if a different panel supplier
   (e.g. Goodix) shows up, adjust `TW_LOAD_VENDOR_MODULES` accordingly.
-* Vibration works through the kernel haptic device (`/dev/awinic_haptic`) with
-  the vendor's full effect configuration bundled in the ramdisk at
-  `recovery/root/odm/etc/` (see above), so `liboplusvibratoreffect.so` and
-  `libsivibrator.so` find their effect files and waveforms.
+* Vibration works through the kernel haptic device (`/dev/awinic_haptic`, the
+  Awinic AW8697 I2C chip) with the vendor's full effect configuration bundled in
+  the ramdisk at `recovery/root/odm/etc/` (see above), so
+  `liboplusvibratoreffect.so` and `libsivibrator.so` find their effect files and
+  waveforms. `aw8697.ko` (plus the OPLUS haptic module set) is in
+  `TW_LOAD_VENDOR_MODULES` so the device node exists in recovery; the unit has no
+  `/sys/class/leds/vibrator`, so TWRP's sysfs haptic fallback does not apply and
+  the AIDL vibrator HAL (`android.hardware.vibrator.IVibrator/default`, which the
+  OPLUS service registers) is the only path.
 * AAC "richtap" is not supported by this firmware: there is no
   `/odm/etc/aac_richtap.config` on the device, so the HAL logs
   `aac richtap not support` — exactly like the stock ROM.
