@@ -92,6 +92,7 @@ jobs:
       - name: Prepare runner (disk space, swap, work paths)
         run: |
           set -euo pipefail
+          exec > >(tee -a "$GITHUB_WORKSPACE/ci.log") 2>&1
 
           # Preinstalled toolchains that this build never uses. Removing them
           # reclaims ~25-30 GB on the (small) root disk.
@@ -107,9 +108,16 @@ jobs:
             /usr/local/lib/node_modules \
             /usr/local/rustup \
             /usr/local/cargo
+          # Extra reclaim if available: docker layers, snapd, azure/chrome.
+          sudo docker image prune -af >/dev/null 2>&1 || true
+          for pkg in snapd azure-cli google-chrome-stable powershell mono-runtime; do
+            sudo apt-get -y purge --auto-remove "$pkg" >/dev/null 2>&1 || true
+          done
           sudo apt-get clean
           echo "--- free space after cleanup ---"
-          df -h /
+          df -h
+          lsblk -f
+          free -h
 
           # Keep sources and build output on the largest mount. Standard runners
           # have everything on /, but /mnt is a separate (larger) disk on some
@@ -119,7 +127,7 @@ jobs:
             | awk 'NR > 1 && $6 != "" {print $4, $6}' \
             | sort -rn | head -1 | awk '{print $2}')" || WORK_ROOT=""
           WORK_ROOT="${WORK_ROOT:-/}"
-          WORK="$WORK_ROOT/fox-work"
+          WORK="${WORK_ROOT%/}/fox-work"
           sudo mkdir -p "$WORK"
           sudo chown -R "$(id -u):$(id -g)" "$WORK"
           SRC="$WORK/src"
@@ -141,7 +149,7 @@ jobs:
           if [ ! -f "$SWAP" ]; then
             FREE_MB=$(( $(df -Pk "$WORK" | awk 'NR == 2 {print $4}') / 1024 ))
             SWAP_MB=$(( FREE_MB / 3 ))
-            if [ "$SWAP_MB" -gt 16384 ]; then SWAP_MB=16384; fi
+            if [ "$SWAP_MB" -gt 8192 ]; then SWAP_MB=8192; fi
             if [ "$SWAP_MB" -lt 2048 ]; then SWAP_MB=2048; fi
             echo "creating a ${SWAP_MB} MB swap file (${FREE_MB} MB free)"
             sudo fallocate -l "${SWAP_MB}M" "$SWAP" \
@@ -155,6 +163,7 @@ jobs:
       - name: Install build dependencies
         run: |
           set -e
+          exec > >(tee -a "$GITHUB_WORKSPACE/ci.log") 2>&1
           git config --global --add safe.directory '*'
           git config --global user.name 'fox_16.0 CI'
           git config --global user.email 'ci@localhost'
@@ -175,6 +184,7 @@ jobs:
       - name: Sync OrangeFox ${{ env.FOX_BRANCH }} sources
         run: |
           set -euo pipefail
+          exec > >(tee -a "$GITHUB_WORKSPACE/ci.log") 2>&1
           cd "$SRC"
           repo init --depth=1 -u https://gitlab.com/OrangeFox/Manifest.git -b "$FOX_BRANCH"
           repo sync -c -j"$(nproc --all)" --no-clone-bundle --no-tags
@@ -185,16 +195,19 @@ jobs:
       - name: Install device tree
         run: |
           set -euo pipefail
+          exec > >(tee -a "$GITHUB_WORKSPACE/ci.log") 2>&1
           DEST="$SRC/device/oneplus/$DEVICE"
           rm -rf "$DEST"
-          mkdir -p "$(dirname "$DEST")"
+          mkdir -p "$DEST"
           # Copy the repository (checked out at the commit being built) into the
           # source tree, minus VCS metadata and build leftovers.
           tar -C "$GITHUB_WORKSPACE" \
             --exclude=./.git --exclude=./artifacts --exclude=./build.log \
-            --exclude=./build-logs -cf - . | tar -C "$DEST" -xf -
+            --exclude=./build-logs --exclude=./ci.log -cf - . | tar -C "$DEST" -xf -
           echo "installed $(du -sh "$DEST" | cut -f1) into $DEST"
           ls -l "$DEST"
+          df -h "$WORK_ROOT" | tail -2
+          du -sh "$SRC" "$OUT_DIR" 2>/dev/null || true
 
       - name: Build ${{ env.BUILD_TARGET }}
         id: build
@@ -366,8 +379,20 @@ jobs:
             echo "## out/error.log"
             tail -n 80 "$GITHUB_WORKSPACE/build-logs/error.log" 2>/dev/null || echo "(none)"
             echo
+            echo "## errors found in the combined step log"
+            grep -nE 'error|fatal|failed|Failed|No space|Cannot|Permission denied|not found' \
+              "$GITHUB_WORKSPACE/ci.log" 2>/dev/null | tail -n 40 || echo "(no matches)"
+            echo
+            echo "## disk / memory at the end of the job"
+            df -h
+            free -h
+            du -sh "$SRC" "$OUT_DIR" 2>/dev/null || true
+            echo
             echo "## last 500 log lines"
             tail -n 500 "$GITHUB_WORKSPACE/build.log" 2>/dev/null || echo "(no build.log)"
+            echo
+            echo "## last 300 lines of the combined step log"
+            tail -n 300 "$GITHUB_WORKSPACE/ci.log" 2>/dev/null || echo "(no ci.log)"
           } > "$REPORT_DIR/report.md" 2>&1
 
           cd "$REPORT_DIR"
