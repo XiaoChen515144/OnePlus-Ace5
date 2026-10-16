@@ -1,4 +1,8 @@
-service vendor.secure_element /odm/bin/hw/android.hardware.secure_element-service.qti
+#
+# In recovery the odm partition is not mounted at this point, so the daemon is
+# shipped inside the recovery ramdisk (at /vendor/bin/hw) and runs as root.
+service vendor.secure_element /vendor/bin/hw/android.hardware.secure_element-service.qti
     class hal
-    user system
-    group nfc system
+    user root
+    group nfc root
+    seclabel u:r:recovery:s0

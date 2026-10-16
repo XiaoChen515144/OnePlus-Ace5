@@ -25,9 +25,18 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
+# Recovery does not use the vendor's init.recovery.* files: this file replaces
+# them.  The security/KMS services (qseecomd, keymint, gatekeeper), weaver,
+# secure element and the oplus vibrator HAL all live in this ramdisk, so they
+# are started by name from here (never by class).
+
 on init
     start vendor.boot-qti
-    setprop prepdecrypt.setpatch true
+    # qseecomd/keymint also start themselves from their own rc files; the
+    # explicit starts make sure they are up even if their class never runs.
+    start vendor.qseecomd
+    start vendor.keymint-qti
+    start vendor.gatekeeper_default
 
 on early-fs
     write /proc/sys/walt/sched_lib_name "recovery,magiskboot,Updater,updater,update_engine_sideload"
@@ -59,10 +68,16 @@ on property:twrp.modules.loaded=true
     write /sys/kernel/boot_adsp/ssr 1
     wait /sys/class/power_supply/battery
     start vendor.health-default
+    # runtime device identification (ro.boot.prjname -> product props)
+    start variant-script
+    # security/keystore services require qseecomd to be up
+    start vendor.qseecomd
+    start vendor.keymint-qti
+    start vendor.gatekeeper_default
+    start vendor.weaver_nxp
+    start vendor.secure_element
+    start vendor.oplus.vibrator
     umount /firmware
-
-on property:ro.crypto.state=encrypted && property:ro.boot.dynamic_partitions=true
-    start prepdecrypt.vendor
 
 on property:servicemanager.ready=true
     setprop sys.boot_completed 1

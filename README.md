@@ -1,6 +1,7 @@
 # OrangeFox Recovery device tree — OnePlus Ace 5 (PKG110 / OP5D2BL1 / "giulia")
 
-Device tree for building **OrangeFox Recovery** for the OnePlus Ace 5.
+Device tree for building **OrangeFox Recovery** (`fox_16.0`, Android 16 base) for
+the OnePlus Ace 5.
 
 Everything below is based on **measurements taken from the device itself**, not
 on assumptions.
@@ -13,59 +14,107 @@ on assumptions.
 | Model | PKG110 (`OP5D2BL1`) |
 | Project code (`ro.boot.prjname`) | `23851` |
 | SoC | Qualcomm **SM8650** ("pineapple"), Adreno 750 |
-| Firmware tested | **C16.0.7.200** (`PKG110_16.0.7.200(CN01)`, Android 16) |
-| Slot | A/B (`slot_suffix=_a`) |
+| Firmware tested | **C16.0.7.200** (`PKG110_16.0.7.200(CN01)`, Android 16 / SDK 36) |
+| Slot | A/B (`slot_suffix=_a`), virtual A/B (COW v3 + zstd) |
 | `dtbo_idx` used | 7 |
-| Panel | `AA577_P_3_A0020_dsc_cmd` (BOE), backlight `panel0-backlight`, max 4095 |
+| Panel | `AA577_P_3_A0020_dsc_cmd` (BOE), backlight `panel0-backlight`, max 4094 |
 | Touch | Synaptics **S3910** → `oplus_bsp_tp_tcm_S3910.ko` |
 | `recovery` partition | 104857600 bytes, **ramdisk-only** (boot header v4, `kernel_size=0`) |
 | `boot` partition | 201326592 bytes, kernel only |
 | `super` | 14578294784 bytes |
+| `/data` | f2fs + `inlinecrypt` + `fileencryption=aes-256-xts:aes-256-cts:v2+inlinecrypt_optimized+wrappedkey_v0`, metadata-encrypted (`aes-256-xts:wrappedkey_v0`) |
+| `/system`, `/vendor`, `/odm`, … | erofs |
 
 The `recovery` partition contains no kernel: the bootloader supplies the kernel
 from `boot`. The tree therefore builds a **ramdisk-only recovery image**
 (`BOARD_EXCLUDE_KERNEL_FROM_RECOVERY_IMAGE := true`).
 
+## Build
+
+The make tree is OrangeFox `fox_16.0`, so the product is called
+`twrp_OP5D2BL1` and lunches against the `bp2a` release
+(`vendor/twrp/vars/aosp_target_release`):
+
+```bash
+export FOX_BUILD_DEVICE=OP5D2BL1
+. build/envsetup.sh
+lunch twrp_OP5D2BL1-bp2a-eng
+mka recoveryimage
+```
+
+The image is written to `out/target/product/OP5D2BL1/recovery.img`.
+
+`ALLOW_MISSING_DEPENDENCIES` is already set by `BoardConfig.mk`; `LC_ALL="C"` is
+recommended to avoid locale issues during the build.
+
+## Flash
+
+Bootloader must be unlocked (`fastboot flashing unlock`; on this unit
+`verifiedbootstate=orange` / `vbmeta.device_state=unlocked`).
+
+```
+fastboot flash recovery_a out/target/product/OP5D2BL1/recovery.img
+fastboot flash recovery_b out/target/product/OP5D2BL1/recovery.img
+```
+
+Both slots must be flashed: the active slot can change on the next OTA.
+
 ## Kernel / module loading
 
-The stock kernel is `6.1.141-android14-11-o-gb0878e0704d9`, built with
-`CONFIG_MODVERSIONS`. Under MODVERSIONS the kernel `localversion` is **not**
-part of the module comparison — only symbol CRCs are. The device runs the stock
-kernel symbols, so the stock modules load fine and **no kernel replacement is
-needed**.
+The `recovery` image ships **no kernel** — the kernel comes from `boot`. The
+tree works with both the stock kernel (`6.1.141-android14-11-o-gb0878e0704d9`)
+and custom 6.1.141 builds (e.g. `6.1.141-xiaochen`), because the kernel is built
+with `CONFIG_MODVERSIONS`: only symbol CRCs are compared, so the stock modules
+load against any kernel built from the same source/config.
 
-The failure mode that produced a black screen is a **module set that does not
-match `modules.dep`**: `msm_drm.ko` has a non-weak (GLOBAL) dependency on
-`hdcp_qseecom_dlkm.ko` and `ufs_qcom.ko` / `sched-walt.ko` need
-`oplus_bsp_sched_assist.ko`. If those provider `.ko` files are absent from the
-module directory that OrangeFox loads from, dependency resolution fails and
-display/storage never come up.
+What actually matters is that the module set matches its `modules.dep`. The
+failure mode that produced a black screen is a module directory that is missing
+**provider** modules: `msm_drm.ko` has a non-weak (GLOBAL) dependency on
+`hdcp_qseecom_dlkm.ko`, and `ufs_qcom.ko` / `sched-walt.ko` need
+`oplus_bsp_sched_assist.ko`. If the providers are absent, dependency resolution
+fails and display/storage never come up.
 
-This tree ships the **complete 483-module set extracted from the stock
-`vendor_boot` ramdisk** in the recovery ramdisk at
+This tree therefore ships the **complete 483-module set** (extracted from the
+stock `vendor_boot` ramdisk) inside the recovery ramdisk at
 `recovery/root/vendor/lib/modules/`, together with its
 `modules.dep` / `modules.alias` / `modules.softdep` / `modules.blocklist`
-metadata. `TW_LOAD_VENDOR_MODULES` lists the top-level modules recovery needs;
-their dependencies are resolved from `modules.dep`.
+metadata (0 unresolved symbols).
 
-Module load order is handled by the OrangeFox `KernelModuleLoader`; both the
-`vendor_boot` ramdisk (`/lib/modules`) and the recovery ramdisk
-(`/vendor/lib/modules`) are complete, so dependency resolution succeeds on
-either path.
+Loading is done by the OrangeFox `KernelModuleLoader`:
+
+* `TW_LOAD_PREBUILT_MODULES_AT_FIRST := true` makes the loader use the
+  in-ramdisk copy (`/vendor/lib/modules`) **before** the vendor/vendor_dlkm
+  partitions are consulted.
+* `TW_LOAD_VENDOR_MODULES` lists the top-level modules recovery needs
+  (`msm_drm`, `ufs_qcom`, the Synaptics S3910 touch modules, …); their
+  dependencies are resolved automatically from `modules.dep`.
+* `TW_LOAD_VENDOR_MODULES_EXCLUDE_GKI := true` skips the `-gki` module
+  directory, so the vendor modules are used on any kernel.
+
+Security-patch levels do **not** need the old `prepdecrypt` helper: the
+`fox_16.0` module loader itself reads `/vendor/build.prop` and
+`/system_root/build.prop` and overrides `ro.vendor.build.security_patch` /
+`ro.build.version.security_patch`. No `prepdecrypt` script/service is shipped.
 
 ## Vendor blobs
 
 The proprietary blobs needed by recovery are **already included** in
-`recovery/root/vendor/` (222 files), extracted from the device's own firmware
-(C16.0.7.200) and completed to the full ELF dependency closure:
+`recovery/root/vendor/`, extracted from the device's own firmware
+(C16.0.7.200) and completed to the full ELF dependency closure. All of them were
+verified byte-for-byte (md5) against the device.
 
-* FBE decryption — `keymint` / `gatekeeper` / `weaver` / `qseecomd` and their
-  libraries (including `android.hardware.keymaster@4.0/4.1.so`,
-  `android.hardware.boot@1.1.so`, `libkeymaster_portable.so`, …)
+* FBE decryption — `keymint` / `gatekeeper` / `weaver` / `qseecomd` / `ssgtzd`
+  and their libraries
 * `fastbootd` — `android.hardware.boot-service.qti`
 * Vibrator — `vendor.oplus.hardware.vibrator-service` +
   `vendor.oplus.hardware.oplusvibrator-V2-ndk.so`
 * Health/HAL firmware loading, modem firmware (`vendor/firmware_mnt`)
+
+On the device several of these live on `/odm` (`weaver`, `secure_element`, the
+vibrator HAL). Recovery does not mount `/odm`, so they are shipped in the
+ramdisk under `/vendor/bin/hw/` and their `.rc` files are adjusted accordingly.
+Every recovery HAL service gets `seclabel u:r:recovery:s0` (recovery has no
+vendor SELinux policy).
 
 Core AOSP libraries that the recovery ramdisk already provides (`libc`, `libm`,
 `libc++`, `libbase`, `libbinder*`, `libcutils`, `liblog`, `libutils`,
@@ -85,59 +134,43 @@ To regenerate the blobs for a different firmware:
 `vendor_blobs.list` is the exact file list; the files live at `/vendor`, `/odm`
 or `/vendor_dlkm` on the device.
 
-## Build
-
-```
-. build/envsetup.sh
-export ALLOW_MISSING_DEPENDENCIES=true
-export LC_ALL="C"
-lunch omni_OP5D2BL1-eng
-mka recoveryimage
-```
-
-The image is written to `out/target/product/OP5D2BL1/recovery.img`.
-
-## Flash
-
-Bootloader must be unlocked.
-
-```
-fastboot flash recovery_a recovery.img
-fastboot flash recovery_b recovery.img
-```
-
-Both slots must be flashed: the active slot can change on the next OTA.
-
 ## Layout
 
 ```
 BoardConfig.mk                 platform, partitions, crypto, TWRP/OF flags
-device.mk                      product config (base/VAB/API/UFFD)
-omni_OP5D2BL1.mk               product definition (lunch target)
+device-OP5D2BL1.mk             product config (base/VAB/API/UFFD)
+twrp_OP5D2BL1.mk               product definition (lunch target)
 AndroidProducts.mk             lunch choices
+vendorsetup.sh                 OrangeFox environment (FOX_* build vars)
+twrp.dependencies              extra repo dependencies (none needed)
 Android.mk / Android.bp        build glue
 recovery.fstab                 Android fstab (dynamic + physical partitions)
 system.prop / vendor.prop      recovery properties
-vendorsetup.sh                 OrangeFox environment
 security/otacert.x509.pem      OTA certificate
-prebuilt/kernel/Image          stock kernel (reference only; not used)
-dtb/                           stock main DTB + 10 dtbo overlays (reference only)
+prebuilt/kernel/Image          stock kernel (reference only; not used by the build)
+dtb/                           stock DTB/DTBO overlays (reference only; not used)
 recovery/root/
-    init.recovery.qcom.rc      QCOM recovery init
+    init.recovery.qcom.rc      QCOM recovery init (HAL/service startup)
     init.recovery.usb.rc       USB gadget config (adb/mtp/fastboot)
     system/etc/twrp.flags      TWRP partition flags
     system/etc/ueventd.rc      ueventd rules
     system/etc/vintf/manifest.xml
     system/bin/variant-script.sh   per-project model/variant props
+    vendor/etc/init/*.rc       HAL service definitions (recovery seclabel)
+    vendor/etc/vintf/          VINTF manifest + HAL fragments
     vendor/lib/modules/        complete 483-module set + depmod metadata
-    vendor/**                  -> add with extract_vendor_blobs.sh
+    vendor/bin/hw/             recovery HAL daemons (keymint/weaver/…)
 ```
 
 ## Notes / status
 
 * `prebuilt/kernel/Image` and `dtb/` are kept for reference only. The recovery
-  build uses the kernel from the `boot` partition.
+  build uses the kernel from the `boot` partition, so they are not packaged.
 * MTP is enabled. If MTP causes trouble on your unit, add
   `TW_EXCLUDE_MTP := true` to `BoardConfig.mk`.
 * Touch modules are the Synaptics S3910 family; if a different panel supplier
   (e.g. Goodix) shows up, adjust `TW_LOAD_VENDOR_MODULES` accordingly.
+* Vibration works through the kernel haptic device. The vendor's vibration
+  **effect** files (`/odm/etc/vibrator/…` on the stock ROM) are not bundled;
+  copy them into `recovery/root/vendor/etc/vibrator/` if the effect library
+  complains.

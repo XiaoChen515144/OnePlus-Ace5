@@ -2,7 +2,7 @@
     Input:
         device/qcom/giulia/manifest_giulia.xml
 -->
-<manifest version="8.0" type="device">
+<manifest version="7.0" type="device" target-level="8">
     <hal format="aidl">
         <name>android.hardware.gatekeeper</name>
         <fqname>IGatekeeper/default</fqname>

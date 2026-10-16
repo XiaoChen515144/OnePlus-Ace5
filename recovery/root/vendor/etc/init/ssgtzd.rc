@@ -20,3 +20,4 @@ service vendor.ssgtzd /vendor/bin/ssgtzd
     disabled
     socket ssgtzd stream 0660 system oem_2912
     socket ssgtzd_opener stream 0660 system system
+    seclabel u:r:recovery:s0
