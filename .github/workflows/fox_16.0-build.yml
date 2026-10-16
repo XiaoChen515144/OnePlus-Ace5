@@ -314,3 +314,68 @@ jobs:
             artifacts/recovery.img.md5
           draft: false
           prerelease: false
+
+      - name: Publish build report to the ci-logs branch
+        # Runs whatever happened, and pushes a report (image info, the log lines
+        # that matter for this device, the AOSP error log and the log tail) to
+        # the `ci-logs` branch, so the build can be inspected with a plain
+        # `git fetch` - no token, no web UI needed. Pushes made with the
+        # GITHUB_TOKEN do not trigger workflows, so this cannot loop.
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_RESULT: ${{ job.status }}
+        run: |
+          set -uo pipefail
+          PRODUCT_OUT="$OUT_DIR/target/product/$DEVICE"
+          REPORT_DIR="$RUNNER_TEMP/report"
+          mkdir -p "$REPORT_DIR"
+
+          {
+            echo "# fox_16.0 build report"
+            echo
+            echo "- run: #$GITHUB_RUN_NUMBER (attempt $GITHUB_RUN_ATTEMPT) -> **$JOB_RESULT**"
+            echo "- commit: \`$GITHUB_SHA\`"
+            echo "- event: \`$GITHUB_EVENT_NAME\` on \`$GITHUB_REF\`"
+            echo "- date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "- lunch: \`$LUNCH_TARGET\` | targets: \`$BUILD_TARGET\` | type: \`$FOX_BUILD_TYPE\`"
+            echo "- runner: $(nproc) vCPU, $(awk '/MemTotal/{printf "%d", $2/1024/1024}' /proc/meminfo) GiB RAM"
+            echo
+            echo "## image"
+            if [ -s "$PRODUCT_OUT/recovery.img" ]; then
+              ls -l "$PRODUCT_OUT/recovery.img"
+              sha256sum "$PRODUCT_OUT/recovery.img"
+            else
+              echo "no recovery.img at \`$PRODUCT_OUT\`"
+            fi
+            echo
+            echo "## product output"
+            ls -l "$PRODUCT_OUT" 2>/dev/null | head -30 || echo "(missing)"
+            echo
+            echo "## kernel module loading"
+            grep -nE 'Modules Loaded|Loaded [0-9]+ modules|Loading (post-decrypt )?module|Post-decrypt|module (loaded|failed)|Failed to load' \
+              "$GITHUB_WORKSPACE/build.log" 2>/dev/null | tail -n 60 || echo "(no matches)"
+            echo
+            echo "## haptics / vibrator"
+            grep -niE 'awinic|haptic|vibrator|leds' "$GITHUB_WORKSPACE/build.log" 2>/dev/null | tail -n 60 || echo "(no matches)"
+            echo
+            echo "## build errors"
+            grep -nE 'ninja: build stopped|^FAILED|error:|ERROR:|undefined reference' \
+              "$GITHUB_WORKSPACE/build.log" 2>/dev/null | tail -n 60 || echo "(no matches)"
+            echo
+            echo "## out/error.log"
+            tail -n 80 "$GITHUB_WORKSPACE/build-logs/error.log" 2>/dev/null || echo "(none)"
+            echo
+            echo "## last 500 log lines"
+            tail -n 500 "$GITHUB_WORKSPACE/build.log" 2>/dev/null || echo "(no build.log)"
+          } > "$REPORT_DIR/report.md" 2>&1
+
+          cd "$REPORT_DIR"
+          git init -q .
+          git checkout -q -b ci-logs
+          git -c user.name='fox_16.0 CI' -c user.email='ci@localhost' add -A
+          git -c user.name='fox_16.0 CI' -c user.email='ci@localhost' commit -q -m "CI report: run #$GITHUB_RUN_NUMBER ($JOB_RESULT)" || true
+          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ci-logs \
+            || echo "::warning::could not push the build report to the ci-logs branch"
+          echo "build report: $(wc -l < "$REPORT_DIR/report.md") lines on the ci-logs branch"
+          tail -n 25 "$REPORT_DIR/report.md"
