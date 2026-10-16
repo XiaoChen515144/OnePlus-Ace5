@@ -53,19 +53,26 @@ Module load order is handled by the OrangeFox `KernelModuleLoader`; both the
 (`/vendor/lib/modules`) are complete, so dependency resolution succeeds on
 either path.
 
-## Vendor blobs (required for a fully working recovery)
+## Vendor blobs
 
-This device tree does **not** ship OnePlus proprietary binaries. Without them
-the recovery still boots and shows the UI (display/storage/touch all work via
-kernel modules), but these features need the matching blobs in
-`recovery/root/vendor/`:
+The proprietary blobs needed by recovery are **already included** in
+`recovery/root/vendor/` (222 files), extracted from the device's own firmware
+(C16.0.7.200) and completed to the full ELF dependency closure:
 
-* FBE decryption — `keymint` / `gatekeeper` / `weaver` / `qseecomd`
+* FBE decryption — `keymint` / `gatekeeper` / `weaver` / `qseecomd` and their
+  libraries (including `android.hardware.keymaster@4.0/4.1.so`,
+  `android.hardware.boot@1.1.so`, `libkeymaster_portable.so`, …)
 * `fastbootd` — `android.hardware.boot-service.qti`
-* Vibrator — `vendor.oplus.hardware.vibrator-service`
-* ADB/MTP, firmware loading, etc.
+* Vibrator — `vendor.oplus.hardware.vibrator-service` +
+  `vendor.oplus.hardware.oplusvibrator-V2-ndk.so`
+* Health/HAL firmware loading, modem firmware (`vendor/firmware_mnt`)
 
-Provide them in one of two ways:
+Core AOSP libraries that the recovery ramdisk already provides (`libc`, `libm`,
+`libc++`, `libbase`, `libbinder*`, `libcutils`, `liblog`, `libutils`,
+`libhardware`, `libhidlbase`, `libz`, `libcrypto`, `libssl`, `libpng`, …) are
+intentionally **not** shipped, so the recovery's own copies are used.
+
+To regenerate the blobs for a different firmware:
 
 ```bash
 # from the running (rooted) device — recommended, firmware-matched
@@ -75,8 +82,8 @@ Provide them in one of two ways:
 ./extract_vendor_blobs.sh --from /path/to/some/recovery/root
 ```
 
-`vendor_blobs.list` (208 files) contains the exact list that is required; the
-files are located at `/vendor`, `/odm` or `/vendor_dlkm` on the device.
+`vendor_blobs.list` is the exact file list; the files live at `/vendor`, `/odm`
+or `/vendor_dlkm` on the device.
 
 ## Build
 
