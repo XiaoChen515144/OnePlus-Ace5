@@ -5,23 +5,27 @@ ALLOW_MISSING_DEPENDENCIES := true
 TARGET_ARCH := arm64
 TARGET_ARCH_VARIANT := armv8-a
 TARGET_CPU_ABI := arm64-v8a
-TARGET_CPU_VARIANT := generic
-TARGET_BOARD_PLATFORM := cliffs
+TARGET_CPU_VARIANT := kryo
+TARGET_BOARD_PLATFORM := oneplus_sm8650
 TARGET_BOARD_PLATFORM_GPU := qcom-adreno750
-TARGET_BOOTLOADER_BOARD_NAME := cliffs
-TARGET_NO_BOOTLOADER := true
+TARGET_BOOTLOADER_BOARD_NAME := pineapple
+PRODUCT_PLATFORM := pineapple
+TARGET_NO_BOOTLOADER := false
+TARGET_USES_UEFI := true
 
-# Ace 5 uses the SM8650 Cliffs platform and a 4 KiB, v4 boot header.
+# OnePlus Ace 5 (PKG110) is SM8650 / pineapple, NOT Cliffs (SM8750).
+# It uses a 4 KiB page size and a v4 boot header.
 TARGET_KERNEL_ARCH := arm64
 TARGET_KERNEL_HEADER_ARCH := arm64
 BOARD_BOOT_HEADER_VERSION := 4
 BOARD_KERNEL_PAGESIZE := 4096
 BOARD_KERNEL_IMAGE_NAME := Image
-TARGET_PREBUILT_KERNEL := $(DEVICE_PATH)/prebuilt/kernel/Image
-BOARD_PREBUILT_DTBIMAGE_DIR := $(DEVICE_PATH)/dtb
-BOARD_INCLUDE_DTB_IN_BOOTIMG := true
-TARGET_RECOVERY_FSTAB := $(DEVICE_PATH)/twrp.fstab
 BOARD_RAMDISK_USE_LZ4 := true
+# The stock `recovery` partition is ramdisk-only (header v4, kernel_size == 0);
+# the bootloader supplies the kernel from the `boot` partition. Keep the
+# recovery image ramdisk-only, matching the stock layout.
+BOARD_EXCLUDE_KERNEL_FROM_RECOVERY_IMAGE := true
+TARGET_RECOVERY_FSTAB := $(DEVICE_PATH)/twrp.fstab
 BOARD_MKBOOTIMG_ARGS += --header_version $(BOARD_BOOT_HEADER_VERSION)
 BOARD_MKBOOTIMG_ARGS += --pagesize $(BOARD_KERNEL_PAGESIZE)
 
@@ -62,8 +66,14 @@ TARGET_RECOVERY_QCOM_RTC_FIX := true
 TW_USE_SERIALNO_PROPERTY_FOR_DEVICE_ID := true
 TW_EXCLUDE_APEX := true
 TW_EXCLUDE_DEFAULT_USB_INIT := true
-#TW_LOAD_VENDOR_MODULES := "ufs_qcom.ko ufshcd-crypto-qti.ko dwc3-msm.ko msm_drm.ko"
-#TW_LOAD_VENDOR_MODULES_EXCLUDE_GKI := true
-#TW_LOAD_VENDOR_BOOT_MODULES := true
+# Recovery kernel-module loading (OrangeFox KernelModuleLoader).
+# TW_LOAD_VENDOR_MODULES is the list of modules to insmod; their dependencies
+# are resolved automatically from modules.dep by Modprobe. The provider modules
+# (hdcp_qseecom_dlkm.ko, oplus_bsp_sched_assist.ko) must exist in the module
+# directory or msm_drm.ko / sched-walt.ko will fail to load (black screen).
+TW_LOAD_VENDOR_MODULES := "ufs_qcom.ko ufshcd-crypto-qti.ko dwc3-msm.ko msm_drm.ko msm_ext_display.ko oplus_bsp_tp_tcm_S3910.ko"
+TW_LOAD_VENDOR_MODULES_EXCLUDE_GKI := true
+TW_LOAD_VENDOR_BOOT_MODULES := true
+TW_LOAD_PREBUILT_MODULES := true
 OF_MANUAL_ROOT_VENDOR_ERROR_FIX := 1
 TW_DEVICE_VERSION := OnePlus_PKG110-C16.0.7.200
